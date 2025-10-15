@@ -71,8 +71,9 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
         self.frame = frame
         super(TaskBarIcon, self).__init__()
         self.set_icon(TRAY_ICON)
-        # self.Bind(wx.adv.EVT_TASKBAR_LEFT_DOWN, self.on_left_down)
+        self.Bind(wx.adv.EVT_TASKBAR_LEFT_DOWN, self.on_left_down)
         self.Bind(wx.adv.EVT_TASKBAR_LEFT_DCLICK, self.configure_wallpapers)
+        self.Bind(wx.adv.EVT_TASKBAR_RIGHT_DOWN, self.on_right_down)
         # Initialize display data
         # get_display_data()
         wpproc.refresh_display_data()
@@ -123,6 +124,12 @@ hotkeys will not work. Exception: %s", excep)
         if self.g_settings.show_help is True:
             config_frame = ConfigFrame(self)
             help_frame = HelpFrame()
+
+        # KDE Plasma 6 workaround: tray icon clicks don't work with wxPython
+        # Automatically open the config GUI on startup
+        if wpproc.running_kde():
+            sp_logging.G_LOGGER.info("KDE Plasma detected: Auto-opening configuration GUI")
+            wx.CallAfter(self.configure_wallpapers, None)
 
 
 
@@ -189,9 +196,8 @@ hotkeys will not work. Exception: %s", excep)
                         except:
                             msg = "Error: could not register hotkey {}. \
 Check that it is formatted properly and valid keys.".format(self.g_settings.hk_binding_next)
-                            sp_logging.G_LOGGER.info(msg)
-                            sp_logging.G_LOGGER.info(sys.exc_info()[0])
-                            show_message_dialog(msg, "Error")
+                            sp_logging.G_LOGGER.warning(msg)
+                            sp_logging.G_LOGGER.warning(sys.exc_info()[0])
                     if self.g_settings.hk_binding_pause not in self.seen_binding:
                         try:
                             self.hk.register(
@@ -203,9 +209,8 @@ Check that it is formatted properly and valid keys.".format(self.g_settings.hk_b
                         except:
                             msg = "Error: could not register hotkey {}. \
 Check that it is formatted properly and valid keys.".format(self.g_settings.hk_binding_pause)
-                            sp_logging.G_LOGGER.info(msg)
-                            sp_logging.G_LOGGER.info(sys.exc_info()[0])
-                            show_message_dialog(msg, "Error")
+                            sp_logging.G_LOGGER.warning(msg)
+                            sp_logging.G_LOGGER.warning(sys.exc_info()[0])
                     # try:
                         # self.hk.register(('control', 'super', 'shift', 'q'),
                                         #  callback=lambda x: self.on_exit(wx.EVT_MENU))
@@ -230,14 +235,12 @@ Check that it is formatted properly and valid keys.".format(self.g_settings.hk_b
                             except:
                                 msg = "Error: could not register hotkey {}. \
 Check that it is formatted properly and valid keys.".format(profile.hk_binding)
-                                sp_logging.G_LOGGER.info(msg)
-                                sp_logging.G_LOGGER.info(sys.exc_info()[0])
-                                show_message_dialog(msg, "Error")
+                                sp_logging.G_LOGGER.warning(msg)
+                                sp_logging.G_LOGGER.warning(sys.exc_info()[0])
                         elif profile.hk_binding in self.seen_binding:
                             msg = "Could not register hotkey: '{}' for profile: '{}'.\n\
 It is already registered for another action.".format(profile.hk_binding, profile.name)
-                            sp_logging.G_LOGGER.info(msg)
-                            show_message_dialog(msg, "Error")
+                            sp_logging.G_LOGGER.warning(msg)
                 # except (SystemHotkeyError, SystemRegisterError, UnregisterError, InvalidKeyError):
                 except:
                     if sp_logging.DEBUG:
@@ -262,9 +265,8 @@ It is already registered for another action.".format(profile.hk_binding, profile
             except:
                 msg = "Error: could not register hotkey {}. \
 Check that it is formatted properly and valid keys.".format(profile.hk_binding)
-                sp_logging.G_LOGGER.info(msg)
-                sp_logging.G_LOGGER.info(sys.exc_info()[0])
-                show_message_dialog(msg, "Error")
+                sp_logging.G_LOGGER.warning(msg)
+                sp_logging.G_LOGGER.warning(sys.exc_info()[0])
 
     def get_profile_by_name(self, name):
         for prof in self.list_of_profiles:
@@ -318,7 +320,15 @@ Check that it is formatted properly and valid keys.".format(profile.hk_binding)
 
     def on_left_down(self, *event):
         """Allows binding left click event."""
+        print('Tray icon was left-clicked.')
         sp_logging.G_LOGGER.info('Tray icon was left-clicked.')
+        # Open configuration on left click as fallback
+        self.configure_wallpapers(event)
+
+    def on_right_down(self, event):
+        """Handle right click event."""
+        print('Tray icon was right-clicked.')
+        sp_logging.G_LOGGER.info('Tray icon was right-clicked.')
 
     def open_config(self, event):
         """Opens Superpaper config folder, CONFIG_PATH."""
@@ -340,7 +350,18 @@ Check that it is formatted properly and valid keys.".format(profile.hk_binding)
 
     def configure_wallpapers(self, event):
         """Opens wallpaper configuration panel."""
-        config_frame = ConfigFrame(self)
+        try:
+            print("configure_wallpapers called")
+            sp_logging.G_LOGGER.info("configure_wallpapers called")
+            config_frame = ConfigFrame(self)
+            print("ConfigFrame created successfully")
+            sp_logging.G_LOGGER.info("ConfigFrame created successfully")
+        except Exception as e:
+            print("configure_wallpapers error: {}".format(e))
+            sp_logging.G_LOGGER.error("configure_wallpapers error: %s", e)
+            import traceback
+            traceback.print_exc()
+            sp_logging.G_LOGGER.error(traceback.format_exc())
 
     def configure_settings(self, event):
         """Opens general settings panel."""
