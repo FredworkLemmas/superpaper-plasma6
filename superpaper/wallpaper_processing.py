@@ -1641,51 +1641,64 @@ def kdeplasma_actions(outputfile, image_piece_list = None, force=False):
     """
 
     script = """
-// make an array of all desktops with a valid screen
-var desktopArray = [];
-for(var desktopIndex in desktops()) {{
-    var desktop = desktops()[desktopIndex];
-    if(desktop.screen != -1) {{
-        desktopArray.push(desktop);
-    }}
-}}
-
-// sort the array based on the (vertical) desktop position
-var i = 1;
-while(i < desktopArray.length) {{
-    var j = i;
-    while(j > 0 && screenGeometry(desktopArray[j-1].screen).top > screenGeometry(desktopArray[j].screen).top) {{
-        var temp = desktopArray[j];
-        desktopArray[j] = desktopArray[j-1];
-        desktopArray[j-1] = temp;
-        j = j-1;
-    }}
-    i = i+1;
-}}
-
-// sort the array based on the (horizontal) desktop position
-var i = 1;
-while(i < desktopArray.length) {{
-    var j = i;
-    while(j > 0 && screenGeometry(desktopArray[j-1].screen).left > screenGeometry(desktopArray[j].screen).left) {{
-        var temp = desktopArray[j];
-        desktopArray[j] = desktopArray[j-1];
-        desktopArray[j-1] = temp;
-        j = j-1;
-    }}
-    i = i+1;
-}}
-
 var imageFileArray = Array({imagelist});
 
-// set the desired wallpaper
-var k = 0;
-while(k < desktopArray.length) {{
-    var desktop = desktopArray[k];
-    desktop.wallpaperPlugin = "org.kde.image";
-    desktop.currentConfigGroup = Array("Wallpaper", "org.kde.image", "General");
-    desktop.writeConfig("Image", imageFileArray[k]);
-    k = k+1;
+// get all desktops across all activities
+var allDesktops = desktops();
+
+// create a map to group desktops by activity
+var activityDesktops = {{}};
+for(var idx = 0; idx < allDesktops.length; idx++) {{
+    var desktop = allDesktops[idx];
+    var activityId = desktop.activity || "default";
+
+    // only include desktops with valid screens
+    if(desktop.screen != -1) {{
+        if(!activityDesktops[activityId]) {{
+            activityDesktops[activityId] = [];
+        }}
+        activityDesktops[activityId].push(desktop);
+    }}
+}}
+
+// process each activity separately
+for(var activityId in activityDesktops) {{
+    var desktopArray = activityDesktops[activityId];
+
+    // sort by vertical position
+    var i = 1;
+    while(i < desktopArray.length) {{
+        var j = i;
+        while(j > 0 && screenGeometry(desktopArray[j-1].screen).top > screenGeometry(desktopArray[j].screen).top) {{
+            var temp = desktopArray[j];
+            desktopArray[j] = desktopArray[j-1];
+            desktopArray[j-1] = temp;
+            j = j-1;
+        }}
+        i = i+1;
+    }}
+
+    // sort by horizontal position
+    i = 1;
+    while(i < desktopArray.length) {{
+        var j = i;
+        while(j > 0 && screenGeometry(desktopArray[j-1].screen).left > screenGeometry(desktopArray[j].screen).left) {{
+            var temp = desktopArray[j];
+            desktopArray[j] = desktopArray[j-1];
+            desktopArray[j-1] = temp;
+            j = j-1;
+        }}
+        i = i+1;
+    }}
+
+    // set wallpaper for each desktop in this activity
+    for(var k = 0; k < desktopArray.length && k < imageFileArray.length; k++) {{
+        var desktop = desktopArray[k];
+        desktop.wallpaperPlugin = "org.kde.image";
+        desktop.currentConfigGroup = Array("Wallpaper", "org.kde.image", "General");
+        desktop.writeConfig("Image", imageFileArray[k]);
+        desktop.reloadConfig();
+    }}
 }}
 """
     profname = None
