@@ -1659,6 +1659,133 @@ def get_kde_activity_mapping():
         sp_logging.G_LOGGER.error("Failed to get KDE activities: %s", e)
         return {}
 
+def kde_load_desktop_mapping_cache():
+    """Load cached desktop-to-activity mapping from file."""
+    cache_file = os.path.join(CONFIG_PATH, "kde_desktop_mapping.json")
+    try:
+        if os.path.isfile(cache_file):
+            import json
+            with open(cache_file, 'r') as f:
+                data = json.load(f)
+                # Convert string keys back to integers
+                return {int(k): v for k, v in data.items()}
+    except Exception as e:
+        sp_logging.G_LOGGER.error("Failed to load desktop mapping cache: %s", e)
+    return {}
+
+def kde_save_desktop_mapping_cache(mapping):
+    """Save desktop-to-activity mapping to file."""
+    cache_file = os.path.join(CONFIG_PATH, "kde_desktop_mapping.json")
+    try:
+        import json
+        with open(cache_file, 'w') as f:
+            json.dump(mapping, f, indent=2)
+        sp_logging.G_LOGGER.info("Saved desktop mapping cache to %s", cache_file)
+    except Exception as e:
+        sp_logging.G_LOGGER.error("Failed to save desktop mapping cache: %s", e)
+
+def kde_get_desktop_to_activity_mapping():
+    """
+    Query KDE to get which desktop containment belongs to which activity.
+    Returns dict mapping desktop_id -> activity_id
+
+    This function builds up knowledge progressively. Each time it's called,
+    it knows for certain which desktops belong to the CURRENT activity,
+    and uses cached information for other activities.
+    """
+    try:
+        import subprocess
+
+        # Load cached mapping
+        desktop_to_activity = kde_load_desktop_mapping_cache()
+
+        # Get list of all activities
+        result = subprocess.run(
+            ["qdbus", "org.kde.ActivityManager", "/ActivityManager/Activities", "ListActivities"],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode != 0:
+            return desktop_to_activity
+
+        activity_ids = [a.strip() for a in result.stdout.strip().split('\n') if a.strip()]
+
+        # Get current activity
+        result = subprocess.run(
+            ["qdbus", "org.kde.ActivityManager", "/ActivityManager/Activities", "CurrentActivity"],
+            capture_output=True, text=True, timeout=5
+        )
+        current_activity_id = result.stdout.strip() if result.returncode == 0 else None
+
+        # Query plasma shell for desktop containment information
+        script = """
+var allDesktops = desktops();
+var result = [];
+for(var i = 0; i < allDesktops.length; i++) {
+    result.push(allDesktops[i].id + ',' + allDesktops[i].screen);
+}
+print(result.join(';'));
+"""
+
+        sessionb = dbus.SessionBus()
+        plasma_interface = dbus.Interface(
+            sessionb.get_object("org.kde.plasmashell", "/PlasmaShell"),
+            dbus_interface="org.kde.PlasmaShell")
+
+        desktop_info = plasma_interface.evaluateScript(script)
+        sp_logging.G_LOGGER.info("Desktop info from plasma: %s", desktop_info)
+
+        # Parse desktop info: "id,screen;id,screen;..."
+        all_desktop_ids = []
+        active_desktop_ids = []
+        if desktop_info:
+            for item in desktop_info.split(';'):
+                if ',' in item:
+                    parts = item.split(',')
+                    desktop_id = int(parts[0])
+                    screen_id = int(parts[1])
+                    all_desktop_ids.append(desktop_id)
+                    if screen_id != -1:
+                        active_desktop_ids.append(desktop_id)
+
+        if not active_desktop_ids or not current_activity_id:
+            sp_logging.G_LOGGER.error("Could not determine active desktops or current activity")
+            return desktop_to_activity
+
+        # Update mapping: the active desktops definitely belong to the current activity
+        mapping_updated = False
+        for desktop_id in active_desktop_ids:
+            if desktop_to_activity.get(desktop_id) != current_activity_id:
+                desktop_to_activity[desktop_id] = current_activity_id
+                mapping_updated = True
+
+        # For any desktops we don't know about yet, make educated guesses
+        # based on the number of screens and activity count
+        unmapped_desktop_ids = [d for d in all_desktop_ids if d not in desktop_to_activity]
+        if unmapped_desktop_ids and len(activity_ids) > 1:
+            other_activities = [a for a in activity_ids if a != current_activity_id]
+            num_screens = len(active_desktop_ids)
+
+            for idx, desktop_id in enumerate(unmapped_desktop_ids):
+                activity_idx = idx // num_screens
+                if activity_idx < len(other_activities):
+                    desktop_to_activity[desktop_id] = other_activities[activity_idx]
+                    mapping_updated = True
+
+        # Save updated mapping
+        if mapping_updated:
+            kde_save_desktop_mapping_cache(desktop_to_activity)
+
+        sp_logging.G_LOGGER.info("Current activity: %s", current_activity_id)
+        sp_logging.G_LOGGER.info("Active desktops: %s", active_desktop_ids)
+        sp_logging.G_LOGGER.info("Desktop to activity mapping: %s", desktop_to_activity)
+        return desktop_to_activity
+
+    except Exception as e:
+        sp_logging.G_LOGGER.error("Failed to get desktop-activity mapping: %s", e)
+        import traceback
+        sp_logging.G_LOGGER.error(traceback.format_exc())
+        return {}
+
 def kde_set_activity_wallpapers(activity_wallpapers_map):
     """
     Set wallpapers for specific activities in KDE Plasma.
@@ -1670,16 +1797,24 @@ def kde_set_activity_wallpapers(activity_wallpapers_map):
         sp_logging.G_LOGGER.info("No activity wallpapers to set")
         return
 
-    # Build the mapping as a JavaScript object literal
-    activity_images_js = "{\n"
-    for activity_id, images in activity_wallpapers_map.items():
-        file_urls = ['file://' + img for img in images]
-        images_str = ', '.join('"' + url + '"' for url in file_urls)
-        activity_images_js += f'    "{activity_id}": [{images_str}],\n'
-    activity_images_js += "}"
+    # Get desktop-to-activity mapping
+    desktop_to_activity = kde_get_desktop_to_activity_mapping()
+    if not desktop_to_activity:
+        sp_logging.G_LOGGER.error("Failed to get desktop-activity mapping, cannot set wallpapers")
+        return
+
+    # Build mapping as JavaScript: desktop_id -> [images]
+    desktop_images_js = "{\n"
+    for desktop_id, activity_id in desktop_to_activity.items():
+        if activity_id in activity_wallpapers_map:
+            images = activity_wallpapers_map[activity_id]
+            file_urls = ['file://' + img for img in images]
+            images_str = ', '.join('"' + url + '"' for url in file_urls)
+            desktop_images_js += f'    {desktop_id}: [{images_str}],\n'
+    desktop_images_js += "}"
 
     script = """
-var activityImagesesMap = """ + activity_images_js + """;
+var desktopImagesMap = """ + desktop_images_js + """;
 
 // Get all desktops
 var allDesktops = desktops();
@@ -1723,14 +1858,14 @@ for(var k = 0; k < activeDesktops.length; k++) {
     screenOrder.push(activeDesktops[k].screen);
 }
 
-// Apply wallpapers to each desktop based on its activity
+// Apply wallpapers to each desktop based on its ID
 for(var idx = 0; idx < allDesktops.length; idx++) {
     var desktop = allDesktops[idx];
-    var activityId = desktop.activityId;
+    var desktopId = desktop.id;
 
-    // Check if we have wallpapers for this activity
-    if(activityImagesesMap[activityId]) {
-        var imageArray = activityImagesesMap[activityId];
+    // Check if we have wallpapers for this desktop
+    if(desktopImagesMap[desktopId]) {
+        var imageArray = desktopImagesMap[desktopId];
         var screenId = desktop.screen;
 
         // For inactive desktops, infer screen from desktop index
@@ -1776,6 +1911,8 @@ for(var idx = 0; idx < allDesktops.length; idx++) {
         sp_logging.G_LOGGER.info("kde_set_activity_wallpapers: Script evaluation complete")
     except Exception as e:
         sp_logging.G_LOGGER.error("kde_set_activity_wallpapers failed: %s", e)
+        import traceback
+        sp_logging.G_LOGGER.error(traceback.format_exc())
 
 def kdeplasma_actions(outputfile, image_piece_list = None, force=False, profile_name=None):
     """
@@ -1803,7 +1940,7 @@ def kdeplasma_actions(outputfile, image_piece_list = None, force=False, profile_
         activity_wallpapers = {}
 
         # Get the current profile's images
-        if outputfile:
+        if outputfile and os.path.isfile(outputfile):
             current_img_names = special_image_cropper(outputfile)
         elif image_piece_list:
             current_img_names = image_piece_list
