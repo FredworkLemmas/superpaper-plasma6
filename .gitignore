@@ -1,11 +1,7 @@
+# pycharm
+.idea
+
+# Python
 __pycache__/
-superpaper/__pycache__
-build/
-dist/
-prime/
-releases/
-superpaper.egg-info/
-*.AppImage
-*.snap
-*.spec
-.vscode
+*.pyc
+*.egg-info

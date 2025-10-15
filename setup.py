@@ -23,7 +23,7 @@ def test_import(packaname, humanname):
         sys.exit(1)
 
 if __name__ == "__main__":
-    test_import("wx", "wxPython")
+    # test_import("wx", "wxPython")  # Commented out to avoid circular dependency during pip install
 
     with open(os.path.join(os.path.abspath(os.path.dirname(__file__)), 'README.md'),
               encoding='utf-8') as f:
