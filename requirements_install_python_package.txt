@@ -1,0 +1,3 @@
+wxPython
+dbus-python
+-e .
