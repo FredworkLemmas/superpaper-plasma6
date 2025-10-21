@@ -1,9 +1,34 @@
-# Superpaper
+# Superpaper (for Plasma 6)
 
-Superpaper is an advanced multi monitor wallpaper manager for **Linux** and **Windows** operating systems, with partial support (no hotkeys) for **MacOS**.
+Superpaper is an advanced multi monitor wallpaper manager for **Linux** and **Windows** operating systems, with
+partial support (no hotkeys) for **MacOS**.
+
+But that's not what this project is about, to be honest.  This project is about making SuperPaper's monitor-spanning
+wallpapers work with KDE's Activities.
 
 ![](https://raw.githubusercontent.com/hhannine/Superpaper/branch-resources/readme-banner.jpg)
 ![](https://raw.githubusercontent.com/hhannine/Superpaper/branch-resources/gui-screenshot.png)
+
+### Updated functionality for Plasma 6
+#### Per-activity wallpaper support
+It's a bit awkward now, but it does work.  The pattern is to:
+
+- fire up the gui and define profiles that use the wallpapers you want to use for each activity.
+- name the profiles with the same (case-sensitive) name as the activities you want to uuse them for.
+- build each profile while in the activity you're wanting it to work for.
+- Rejoice! then complain about how awkward the UX is now that Fred's been working on it.
+
+#### Notes
+This project is literally only for using SuperPaper in a KDE/Plasma 6 environment and it is likely very broken
+for every other environment. 
+
+#### Installation of this forked project
+The major points are:
+
+1. Clone the repo
+2. create a virtualenv for the project
+3. install the requirements: `pip install -r requirements_install_python_package.txt`
+4. run the project: `python -m superpaper`
 
 ### Novel features include
 - Advanced wallpaper spanning options
